@@ -1,0 +1,137 @@
+####data processing and cleaning (this part was run in python)####
+import pandas as pd
+import numpy as np
+
+df = pd.read_csv('/Users/ninachen/Desktop/ac50_Matrix_190226.csv')
+
+# Rename Column
+df = df.rename(columns={'Unnamed: 0': 'Code'})
+df.head(6)
+
+# Transpose Dataset and Rename Columns
+df = df.set_index('Code')
+df = df.stack()
+df.index = df.index.rename('Testname', level=1)
+df.name = 'AC50'
+df = df.reset_index()
+
+# Drop all null values
+df1 = df.dropna(axis=0,how='all')
+df1.head(6)
+
+df1.to_csv('AC50_Values.csv',index=False)
+
+
+
+####Modeling(this part was run in R)####
+library(rpart)
+
+extra_drugs_target <- read.csv("/Users/jx/Desktop/extra_drugs_target.csv")
+raw_data_target <- read.csv("/Users/jx/Desktop/new_data_target.csv")
+
+table(raw_data_target$Classification)
+summary(raw_data_target)
+
+str(extra_drugs_target)
+str(raw_data_target)
+
+#split
+set.seed(333)
+extra_drugs_target$active_flag <- as.factor(extra_drugs_target$active_flag)
+raw_data_target$active_flag <- as.factor(raw_data_target$active_flag)
+ind <- sample(2, nrow(raw_data_target), replace = T, prob = c(0.7, 0.3))
+train1 <- raw_data_target[ind==1,]
+test1 <- raw_data_target[ind!=1,]
+
+
+#rpart
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+
+tree <- rpart(Classification~ Cratio+ active_flag, data= train1, method='class',
+              control = rpart.control(cp=0))
+
+test1$pred <- predict(tree, test1[c("Cratio","active_flag")], type = "class")
+acc_prune <- mean(test1$pred == test1$Classification)
+acc_prune
+
+pred_extra <- predict(tree,extra_drugs_target[c("Cratio","active_flag")], type = "class")
+CrossTable(extra_drugs_target$Classification, pred_extra,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('actual', 'predicted'))
+
+printcp(tree)
+plotcp(tree)
+
+
+fancyRpartPlot(tree)
+
+#post-prune
+tree_prune <- prune(tree,cp= tree$cptable[which.min(tree$cptable[,"xerror"]),"CP"])
+test1$pred <- predict(tree_prune, test1[c("Cratio","active_flag")], type = "class")
+acc_prune <- mean(test1$pred == test1$Classification)
+acc_prune
+
+pred_extra <- predict(tree_prune,extra_drugs_target[c("Cratio","active_flag")], type = "class")
+CrossTable(extra_drugs_target$Classification, pred_extra,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('actual', 'predicted'))
+
+
+
+#pre-prune
+pre_prune <- rpart(Classification ~ Cratio + active_flag, data= train1, method='class',
+                   control = rpart.control(cp= 0.0031, maxdepth = 7, minsplit = 500, minbucket = 600))
+
+test1$pred2 <- predict(pre_prune, test1[c("Cratio","active_flag")], type = "class")
+acc_prune2 <- mean(test1$pred2 == test1$Classification)
+acc_prune2
+
+pred_extra2 <- predict(pre_prune,extra_drugs_target[c("Cratio","active_flag")], type = "class")
+CrossTable(extra_drugs_target$Classification, pred_extra2,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('actual', 'predicted'))
+
+rpart.plot(pre_prune)
+######test
+
+install.packages("randomForest")
+library(randomForest)
+
+random_tree <- randomForest(Classification ~ Cratio + active_flag, data= train1,
+                            mtry= 2,
+                            nodesize= 100,
+                            sampsize= 40493)
+
+test1$pred4 <- predict(random_tree, test1[c("Cratio","active_flag")],type = "class")
+acc_prune4 <- mean(test1$pred4 == test1$Classification)
+acc_prune4
+
+pred_extra4 <- predict(pre_prune,extra_drugs_target[c("Cratio","active_flag")], type = "class")
+CrossTable(extra_drugs_target$Classification, pred_extra4,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('actual', 'predicted'))
+
+
+#hyper tune
+mtry <- seq(1, 2, 1)
+nodesize <- seq(100,1000,100)
+sampsize <- nrow(train1) * c(0.7,0.8)
+
+hyper_grid <- expand.grid(mtry= mtry, nodesize= nodesize, sampsize=sampsize)
+
+oob_err <- c()
+
+for(i in 1:nrow(hyper_grid)){
+  model <- randomForest(Classification ~ Cratio + active_flag, 
+                        data= train1,
+                        mtry= hyper_grid$mtry[i],
+                        nodesize= hyper_grid$nodesize[i],
+                        sampsize= hyper_grid$sampsize[i])
+  oob_err[i] <- model$err.rate[nrow(model$err.rate), "OOB"]
+  
+}
+
+opt_i <- which.min(oob_err)
+print(hyper_grid[opt_i,])
