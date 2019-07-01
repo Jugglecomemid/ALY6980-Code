@@ -22,12 +22,279 @@ df1.head(6)
 df1.to_csv('AC50_Values.csv',index=False)
 
 
+####Merge dataset(this part was run in R)####
+
+mednas <- read.csv("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\medNAS_dili_tt.csv")
+ac50 <- read.csv("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\AC50_Values.csv")
+cmax500 <- readxl::read_xlsx("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\500_Cmax_Project.xlsx", sheet = 1)
+assay <- read.csv("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\w11\\Assay_Summary_190226.csv")
+
+
+colnames(mednas)
+mednas <- unique(mednas[c("Classification","code","CmaxStand")], row.names = FALSE)
+
+colnames(cmax500)
+temp <- merge(mednas, cmax500, by = "code")
+
+summary(temp)
+names(temp)[8] <- "Cmax"
+temp$Cmax[is.na(temp$Cmax)] <- temp$CmaxStand[is.na(temp$Cmax)]
+
+colnames(ac50)
+temp2 <- merge(ac50, temp, by.x = "Code", by.y = "code")
+
+temp2 <- unique(temp2)
+summary(temp2)
+
+temp2$Cratio <- temp2$Cmax / temp2$AC50
+
+
+temp2$active_flag <- rep(1,nrow(temp2))
+temp2$active_flag[temp2$AC50 == 1000000] <- 0
+
+# revise labels
+summary(temp2$Classification)
+temp2$Classification <- as.character(temp2$Classification)
+temp2 <- temp2[temp2$Classification != "AmbiDILIDrugs",]
+temp2$Classification[temp2$Classification=="MostDILI Drugs"] <- "MostDILI"
+temp2$Classification[temp2$Classification!="MostDILI"] <- "Others"
+temp2$Classification <- as.factor(temp2$Classification)
+temp2$active_flag <- as.factor(temp2$active_flag)
+table(temp2$Classification)
+
+summary(temp2)
+newdata <- temp2[c("Code","Testname","AC50","active_flag","Cratio","Classification")]
+
+colnames(assay)
+colnames(newdata)
+assay <- assay[c("intended_target_family","intended_target_type","assay_component_endpoint_name","cell_short_name")]
+
+new_dataset <- merge(newdata, assay, by.x = "Testname", by.y = "assay_component_endpoint_name")
+new_dataset$lg_Cratio <- log10(new_dataset$Cratio)
+
+# Cratio categories 1
+new_dataset$Cratio_level[new_dataset$lg_Cratio < -7] <- "extremly_low"
+new_dataset$Cratio_level[(new_dataset$lg_Cratio >= -7)&(new_dataset$lg_Cratio < -3)] <- "low"
+new_dataset$Cratio_level[(new_dataset$lg_Cratio >= -3)&(new_dataset$lg_Cratio < -1)] <- "medium"
+new_dataset$Cratio_level[(new_dataset$lg_Cratio >= -1)&(new_dataset$lg_Cratio < 2)] <- "high"
+new_dataset$Cratio_level[(new_dataset$lg_Cratio >= 2)] <- "extremly_high"
+new_dataset$Cratio_level <- factor(new_dataset$Cratio_level)
+
+# Cratio categories 2
+new_dataset$Cratio_level2[new_dataset$lg_Cratio < -7] <- "less_than_1e-7"
+
+for (i in -7:5) {
+  new_dataset$Cratio_level2[(new_dataset$lg_Cratio >= i)&(new_dataset$lg_Cratio < i+1)] <- paste0("1e",i,"_to_1e",i+1)
+}
+new_dataset$Cratio_level2[new_dataset$lg_Cratio >= 6] <- "more_than_1e6"
+new_dataset$Cratio_level2 <- factor(new_dataset$Cratio_level2)
+
+# Cratio categories 3
+new_dataset$Cratio_level3[new_dataset$lg_Cratio >= 0] <- "more_risk_activated"
+new_dataset$Cratio_level3[new_dataset$lg_Cratio < 0] <- "less_risk_activated"
+new_dataset$Cratio_level3 <- as.factor(new_dataset$Cratio_level3)
+
+summary(new_dataset)
+
+# regroup NA to unknown
+new_dataset$intended_target_family <- as.character(new_dataset$intended_target_family)
+new_dataset$intended_target_family[is.na(new_dataset$intended_target_family)] <- "unknown"
+
+new_dataset$intended_target_type <- as.character(new_dataset$intended_target_type)
+new_dataset$intended_target_type[is.na(new_dataset$intended_target_type)] <- "unknown"
+
+new_dataset$cell_short_name <- as.character(new_dataset$cell_short_name)
+new_dataset$cell_short_name[is.na(new_dataset$cell_short_name)] <- "unknown"
+
+write.csv(new_dataset,"C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\ppt\\new_dataset.csv",row.names = FALSE)
+
+
+# merge extra_drug -------------------------------------
+
+ac50 <- read.csv("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\AC50_Values.csv")
+dili <- readxl::read_xls("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\DILIrank-List.xls", sheet = 1)
+cmax500 <- readxl::read_xlsx("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\500_Cmax_Project.xlsx", sheet = 1)
+newdata <- read.csv("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\w8\\new_data.csv")
+assay <- read.csv("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\w11\\Assay_Summary_190226.csv")
+
+colnames(cmax500)
+
+cmax500_extra <- cmax500[!cmax500$code%in%newdata$Code,]
+
+colnames(dili)
+
+cmax_and_dili <- merge(cmax500_extra, dili, by.x = "chnm", by.y = "Compound Name")
+
+colnames(ac50)
+
+extra_drugs <- merge(cmax_and_dili,ac50, by.x = "code", by.y = "Code")
+
+sum(duplicated(extra_drugs))
+extra_drugs <- unique(extra_drugs)
+
+colnames(extra_drugs)
+colnames(newdata)
+
+names(extra_drugs)[6] <- "Cmax"
+
+extra_drugs <- extra_drugs[c("code","Cmax","vDILIConcern","Testname","AC50")]
+
+colnames(extra_drugs)[1] <- "Code"
+colnames(extra_drugs)[3] <- "Classification"
+
+sum(is.na(extra_drugs))
+
+extra_drugs <- na.omit(extra_drugs)
+
+extra_drugs$Cratio <- extra_drugs$Cmax / extra_drugs$AC50
+
+extra_drugs$active_flag <- rep(1,nrow(extra_drugs))
+extra_drugs$active_flag[extra_drugs$AC50 == 1000000] <- 0
+extra_drugs$active_flag <- as.factor(extra_drugs$active_flag)
+
+summary(extra_drugs)
+
+# revise labels
+str(extra_drugs$Classification)
+unique(extra_drugs$Classification)
+
+extra_drugs <- extra_drugs[extra_drugs$Classification != "Ambiguous DILI-concern",]
+extra_drugs$Classification[extra_drugs$Classification == "vMost-DILI-Concern"] <- "MostDILI"
+extra_drugs$Classification[extra_drugs$Classification != "MostDILI"] <- "Others"
+extra_drugs$Classification <- as.factor(extra_drugs$Classification)
+
+colnames(extra_drugs)
+extra_drugs <- extra_drugs[c("Code","Testname","AC50","active_flag","Cratio","Classification")]
+colnames(assay)
+assay <- assay[c("intended_target_family","intended_target_type","assay_component_endpoint_name","cell_short_name")]
+
+extra_drugs <- merge(extra_drugs, assay, by.x = "Testname", by.y = "assay_component_endpoint_name")
+extra_drugs$lg_Cratio <- log10(extra_drugs$Cratio)
+
+# Cratio categories 1
+extra_drugs$Cratio_level[extra_drugs$lg_Cratio < -7] <- "extremly_low"
+extra_drugs$Cratio_level[(extra_drugs$lg_Cratio >= -7)&(extra_drugs$lg_Cratio < -3)] <- "low"
+extra_drugs$Cratio_level[(extra_drugs$lg_Cratio >= -3)&(extra_drugs$lg_Cratio < -1)] <- "medium"
+extra_drugs$Cratio_level[(extra_drugs$lg_Cratio >= -1)&(extra_drugs$lg_Cratio < 2)] <- "high"
+extra_drugs$Cratio_level[(extra_drugs$lg_Cratio >= 2)] <- "extremly_high"
+
+# Cratio categories 2
+extra_drugs$Cratio_level2[extra_drugs$lg_Cratio < -7] <- "less_than_1e-7"
+for (i in -7:5) {
+  extra_drugs$Cratio_level2[(extra_drugs$lg_Cratio >= i)&(extra_drugs$lg_Cratio < i+1)] <- paste0("1e",i,"_to_1e",i+1)
+}
+extra_drugs$Cratio_level2[extra_drugs$lg_Cratio >= 6] <- "more_than_1e6"
+extra_drugs$Cratio_level2 <- factor(extra_drugs$Cratio_level2)
+
+# Cratio categories 3
+extra_drugs$Cratio_level3[extra_drugs$lg_Cratio >= 0] <- "more_risk_activated"
+extra_drugs$Cratio_level3[extra_drugs$lg_Cratio < 0] <- "less_risk_activated"
+extra_drugs$Cratio_level3 <- as.factor(extra_drugs$Cratio_level3)
+
+# regroup NA as unknown
+extra_drugs$intended_target_family <- as.character(extra_drugs$intended_target_family)
+extra_drugs$intended_target_family[is.na(extra_drugs$intended_target_family)] <- "unknown"
+
+extra_drugs$intended_target_type <- as.character(extra_drugs$intended_target_type)
+extra_drugs$intended_target_type[is.na(extra_drugs$intended_target_type)] <- "unknown"
+
+extra_drugs$cell_short_name <- as.character(extra_drugs$cell_short_name)
+extra_drugs$cell_short_name[is.na(extra_drugs$cell_short_name)] <- "unknown"
+
+
+summary(extra_drugs)
+write.csv(extra_drugs,"C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\ppt\\extra_drugs.csv",row.names = FALSE)
+
+
+# merge drug_matrix ------------------------------------
+ac50_raw <- read.csv("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\w12\\ac50_Matrix_190226.csv")
+dili <- readxl::read_xls("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\DILIrank-List.xls", sheet = 1)
+cmax500 <- readxl::read_xlsx("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\500_Cmax_Project.xlsx", sheet = 1)
+
+# remove useless columns
+cmax500 <- cmax500[c(3,4,6)]
+colnames(cmax500) <- c("code", "LTKBID", "Cmax500")
+colnames(dili)
+dili <- dili[c("LTKBID", "vDILIConcern")]
+
+# merge 500Cmax and LKTB
+temp <- merge(cmax500, dili, by = "LTKBID")
+summary(temp)
+names(temp)[4] <- "Classification"
+temp <- na.omit(temp)
+
+# merg ac50_matrix
+colnames(ac50_raw)
+drug_matrix <- merge(temp, ac50_raw, by.x = "code", by.y = "X")
+
+head(colnames(drug_matrix))
+table(drug_matrix$Classification)
+
+# revise labels
+drug_matrix <- drug_matrix[drug_matrix$Classification != "Ambiguous DILI-concern",]
+drug_matrix$Classification[drug_matrix$Classification != "vMost-DILI-Concern"] <- "Others"
+drug_matrix$Classification[drug_matrix$Classification == "vMost-DILI-Concern"] <- "MostDILI"
+
+
+drug_matrix_label <- drug_matrix[1:4]
+drug_matrix_label$Classification <- as.factor(drug_matrix_label$Classification)
+drug_matrix_data <- drug_matrix[5:1403]
+
+# detect columns that only contains NA
+j <- 1
+empty_ind <- NULL
+for (i in 1:1399) {
+  if (nrow(na.omit(drug_matrix_data[i])) == 0) {
+    empty_ind[j] <- i
+    j <- j + 1
+  }
+}
+
+# remove NA columns
+drug_matrix_data <- drug_matrix_data[-empty_ind]
+
+# create index of NA
+na_ind <- is.na(drug_matrix_data)
+
+drug_matrix_data[is.na(drug_matrix_data)] <- 1e6
+
+# create index of NA and 1e6
+na_1e6_ind <- drug_matrix_data == 1e6
+
+drug_matrix_data <- log10(drug_matrix$Cmax500/drug_matrix_data)
+
+# convert range
+# r-s-t to R-S-T
+# S = [(s-r)/(t-r)][T-R] + R
+
+max(drug_matrix_data)
+min(drug_matrix_data)
+
+max(drug_matrix_data[!na_1e6_ind])
+min(drug_matrix_data[!na_1e6_ind])
+
+floor(min(drug_matrix_data[!na_1e6_ind])) - 1
+ceiling(max(drug_matrix_data[!na_1e6_ind])) + 1
+
+drug_matrix_data <- (drug_matrix_data - (-7))/(9 - (-7)) * (10 - 0) + 0
+
+# assign 0 to NA
+drug_matrix_data[na_ind] <- 0
+
+# assign -1 to 1e6
+drug_matrix_data[xor(na_ind,na_1e6_ind)] <- -1
+
+summary(drug_matrix_data[1:10])
+
+# save to file
+write.csv(cbind(drug_matrix_label, drug_matrix_data),"C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\ppt\\drug_matrix.csv",row.names = FALSE)
+
 
 ####Modeling(this part was run in R)####
 library(rpart)
 
-extra_drugs_target <- read.csv("/Users/jx/Desktop/extra_drugs_target.csv")
-raw_data_target <- read.csv("/Users/jx/Desktop/new_data_target.csv")
+extra_drugs_target <- extra_drugs.csv
+raw_data_target <- new_dataset
 
 table(raw_data_target$Classification)
 summary(raw_data_target)
@@ -114,7 +381,7 @@ CrossTable(extra_drugs_target$Classification, pred_extra4,
            dnn = c('actual', 'predicted'))
 
 
-#hyper tune
+#hyperparameters tuning
 mtry <- seq(1, 2, 1)
 nodesize <- seq(100,1000,100)
 sampsize <- nrow(train1) * c(0.7,0.8)
@@ -135,3 +402,103 @@ for(i in 1:nrow(hyper_grid)){
 
 opt_i <- which.min(oob_err)
 print(hyper_grid[opt_i,])
+
+####Reducing overfitting(this part was run in R) ####
+drug_matrix <- read.csv("C:\\Users\\selpa\\OneDrive\\NEU_Analytics\\6980\\ppt\\drug_matrix.csv")
+
+set.seed(123)
+
+table(drug_matrix_label$Classification)
+
+drug_matrix_data1 <- drug_matrix_data[drug_matrix_label$Classification == "MostDILI",]
+drug_matrix_label1 <- drug_matrix_label[drug_matrix_label$Classification == "MostDILI",]
+
+drug_matrix_data2 <- drug_matrix_data[drug_matrix_label$Classification != "MostDILI",]
+drug_matrix_label2 <- drug_matrix_label[drug_matrix_label$Classification != "MostDILI",]
+
+
+ind6 <- sample(2, nrow(drug_matrix_data1), replace = T, prob = c(0.7,0.3))
+ind7 <- sample(2, nrow(drug_matrix_data2), replace = T, prob = c(0.7,0.3))
+
+drug_matrix_data1_train <- drug_matrix_data1[ind6 == 1,]
+drug_matrix_data1_test <- drug_matrix_data1[ind6 != 1,]
+
+drug_matrix_label1_train <- drug_matrix_label1[ind6 == 1,]
+drug_matrix_label1_test <- drug_matrix_label1[ind6 != 1,]
+
+drug_matrix_data2_train <- drug_matrix_data2[ind7 == 1,]
+drug_matrix_data2_test <- drug_matrix_data2[ind7 != 1,]
+
+drug_matrix_label2_train <- drug_matrix_label2[ind7 == 1,]
+drug_matrix_label2_test <- drug_matrix_label2[ind7 != 1,]
+
+
+train_drug_matrix_data <- rbind(drug_matrix_data1_train,drug_matrix_data2_train)
+test_drug_matrix_data <- rbind(drug_matrix_data1_test,drug_matrix_data2_test)
+train_drug_matrix_label <- rbind(drug_matrix_label1_train,drug_matrix_label2_train)
+test_drug_matrix_label <- rbind(drug_matrix_label1_test,drug_matrix_label2_test)
+
+# Decision tree -----------------------------------------------
+
+table(train_drug_matrix_label$Classification)
+table(test_drug_matrix_label$Classification)
+
+
+library(C50)
+fit1 <- C5.0(train_drug_matrix_data, train_drug_matrix_label$Classification)
+fit1
+summary(fit1)
+
+fit1_pred <- predict(fit1, test_drug_matrix_data)
+library(gmodels)
+CrossTable(test_drug_matrix_label$Classification, fit1_pred,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('actual', 'predicted'))
+
+C5imp(fit1)
+plot(fit1)
+
+# Random Forest ---------------------------------------------------------------
+
+library(randomForest)
+rf1 <- randomForest(train_drug_matrix_data, train_drug_matrix_label$Classification)
+
+rf1_pred <- predict(rf1, test_drug_matrix_data)
+CrossTable(test_drug_matrix_label$Classification, rf1_pred,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('actual', 'predicted'))
+
+# xgboost ---------------------------------------------------------------
+
+library(xgboost)
+library(data.table)
+library(Matrix)
+
+train_sparse <- sparse.model.matrix( ~., data = train_drug_matrix_data)[,-1]
+
+output_vector <- ifelse(train_drug_matrix_label$Classification =="MostDILI",1,0)
+
+xgb1 <- xgboost(data = train_sparse, label = output_vector, max_depth = 3,
+                eta = 1, nthread = 2, nrounds = 6,objective = "binary:logistic")
+
+importance <- xgb.importance(feature_names = colnames(train_sparse), model = xgb1)
+head(importance,30)
+head(train_sparse)
+
+
+test_sparse <- sparse.model.matrix( ~., data = test_drug_matrix_data)[,-1]
+
+test_vector <- ifelse(test_drug_matrix_label$Classification =="MostDILI",1,0)
+xgb_pred1 <- predict(xgb1,test_sparse, type = "response")
+library(gmodels)
+CrossTable(test_vector, round(xgb_pred1),
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('actual', 'predicted'))
+
+library(pROC)
+xgb_pred1_roc <- roc(test_vector, xgb_pred1)
+plot(xgb_pred1_roc,print.auc=TRUE,auc.polygon=TRUE,grid=c(0.1,0.2),
+     grid.col=c("green","red"),max.auc.polygon=TRUE,auc.polygon.col="skyblue",print.thres=TRUE)
+xgb.plot.tree(model = xgb1)
+
+
